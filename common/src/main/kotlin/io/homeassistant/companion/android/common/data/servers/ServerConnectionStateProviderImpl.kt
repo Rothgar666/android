@@ -17,6 +17,7 @@ import io.homeassistant.companion.android.common.data.network.WifiHelper
 import io.homeassistant.companion.android.common.util.DisabledLocationHandler
 import io.homeassistant.companion.android.database.server.ServerConnectionInfo
 import io.homeassistant.companion.android.database.server.ServerDao
+import io.homeassistant.companion.android.util.isTailscaleAddress
 import java.net.URL
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -105,7 +106,7 @@ internal class ServerConnectionStateProviderImpl @AssistedInject constructor(
 
         return buildList {
             // Internal URL: use when on home network, or when prioritized and connection is secure/allowed
-            val internalUrlIsSecure = connection.internalUrl?.startsWith("https://") == true
+            val internalUrlIsSecure = connection.internalHttpUrl?.isTransportSecure() == true
             val canUseInternalUrl = isOnHomeNetwork ||
                 (connection.prioritizeInternal && (internalUrlIsSecure || allowInsecure))
             if (canUseInternalUrl) {
@@ -116,7 +117,7 @@ internal class ServerConnectionStateProviderImpl @AssistedInject constructor(
             connection.cloudhookHttpUrl?.let(::add)
 
             // External URL: use when on home network, or when connection is secure/allowed
-            val externalUrlIsSecure = connection.externalUrl.startsWith("https://")
+            val externalUrlIsSecure = connection.externalHttpUrl?.isTransportSecure() == true
             val canUseExternalUrl = isOnHomeNetwork || externalUrlIsSecure || allowInsecure
             if (canUseExternalUrl) {
                 connection.externalHttpUrl?.buildWebhookUrl(webhookId)?.let(::add)
@@ -124,7 +125,7 @@ internal class ServerConnectionStateProviderImpl @AssistedInject constructor(
 
             // Extra URLs: tried last, in the order configured by the user
             connection.extraHttpUrls
-                .filter { isOnHomeNetwork || it.isHttps || allowInsecure }
+                .filter { isOnHomeNetwork || it.isTransportSecure() || allowInsecure }
                 .forEach { add(it.buildWebhookUrl(webhookId)) }
         }
     }
@@ -148,7 +149,7 @@ internal class ServerConnectionStateProviderImpl @AssistedInject constructor(
     override suspend fun canSafelySendCredentials(url: String): Boolean {
         val connection = connection()
         if (!connection.isKnownUrl(url)) return false
-        if (url.startsWith("https://")) return true
+        if (url.toHttpUrlOrNull()?.isTransportSecure() == true) return true
 
         // URL is HTTP and belongs to this server - check if it's safe
         val allowInsecure = connection.allowInsecureConnection ?: true
@@ -181,7 +182,7 @@ internal class ServerConnectionStateProviderImpl @AssistedInject constructor(
                 allowHttp = allowInsecure || isInternal(requiresUrl = false),
             )
 
-            if (allowInsecure || potentialUrl?.protocol == "https") {
+            if (allowInsecure || potentialUrl?.toString()?.toHttpUrlOrNull()?.isTransportSecure() == true) {
                 UrlState.HasUrl(potentialUrl)
             } else {
                 if (isInternal(requiresUrl = false)) {
@@ -206,13 +207,22 @@ internal class ServerConnectionStateProviderImpl @AssistedInject constructor(
             this@firstReachableOrSelf?.toString()?.toHttpUrlOrNull()?.let(::add)
             connection.externalHttpUrl?.let(::add)
             addAll(connection.extraHttpUrls)
-        }.distinct().filter { allowHttp || it.isHttps }
+        }.distinct().filter { allowHttp || it.isTransportSecure() }
 
         // Probe in parallel so the wait is at most one timeout, then honor the configured priority.
         val reachable = coroutineScope {
             candidates.map { async { urlReachabilityChecker.isReachable(it) } }.awaitAll()
         }
         return candidates.zip(reachable).firstOrNull { it.second }?.first?.toUrl() ?: this
+    }
+
+    /**
+     * Whether traffic to this URL is encrypted: HTTPS, or plain HTTP to a Tailscale address while
+     * the device is connected to a VPN, since Tailscale encrypts everything it carries. The VPN
+     * state is only read for Tailscale addresses.
+     */
+    private fun HttpUrl.isTransportSecure(): Boolean {
+        return isHttps || (isTailscaleAddress() && networkHelper.isUsingVpn())
     }
 
     private fun observeConnectionInfoChanges(): Flow<ServerConnectionInfo> {
