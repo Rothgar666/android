@@ -745,6 +745,121 @@ class ServerConnectionStateProviderImplTest {
     }
 
     @Nested
+    inner class TailscaleUrls {
+
+        private val tailscaleUrl = "http://homeassistant.tail1234.ts.net:8123"
+
+        @Test
+        fun `Given plain HTTP Tailscale URL and VPN active when collecting urlFlow then emits HasUrl`() = runTest {
+            val provider = createServerConnectionStateProvider(
+                externalUrl = tailscaleUrl,
+                allowInsecureConnection = false,
+            )
+            every { serverDao.getFlow(serverId) } returns flowOf(null)
+            every { networkHelper.isUsingVpn() } returns true
+
+            val result = provider.urlFlow().first()
+
+            assertEquals("$tailscaleUrl/", (result as UrlState.HasUrl).url?.toString())
+        }
+
+        @Test
+        fun `Given plain HTTP Tailscale URL and no VPN when collecting urlFlow then emits InsecureState`() = runTest {
+            val provider = createServerConnectionStateProvider(
+                externalUrl = tailscaleUrl,
+                allowInsecureConnection = false,
+            )
+            every { serverDao.getFlow(serverId) } returns flowOf(null)
+            every { networkHelper.isUsingVpn() } returns false
+
+            assertTrue(provider.urlFlow().first() is UrlState.InsecureState)
+        }
+
+        @Test
+        fun `Given plain HTTP non Tailscale URL and VPN active when collecting urlFlow then still InsecureState`() = runTest {
+            val provider = createServerConnectionStateProvider(
+                externalUrl = "http://home.example.com:8123",
+                allowInsecureConnection = false,
+            )
+            every { serverDao.getFlow(serverId) } returns flowOf(null)
+            every { networkHelper.isUsingVpn() } returns true
+
+            assertTrue(provider.urlFlow().first() is UrlState.InsecureState)
+        }
+
+        @Test
+        fun `Given Tailscale IP URL and VPN active when calling getApiUrls then external URL is included`() = runTest {
+            val provider = createServerConnectionStateProvider(
+                externalUrl = "http://100.101.102.103:8123",
+                webhookId = "webhook123",
+                allowInsecureConnection = false,
+            )
+            every { networkHelper.isUsingVpn() } returns true
+
+            val result = provider.getApiUrls().map { it.toString() }
+
+            assertEquals(listOf("http://100.101.102.103:8123/api/webhook/webhook123"), result)
+        }
+
+        @Test
+        fun `Given Tailscale IP URL and no VPN when calling getApiUrls then external URL is skipped`() = runTest {
+            val provider = createServerConnectionStateProvider(
+                externalUrl = "http://100.101.102.103:8123",
+                webhookId = "webhook123",
+                allowInsecureConnection = false,
+            )
+            every { networkHelper.isUsingVpn() } returns false
+
+            assertTrue(provider.getApiUrls().isEmpty())
+        }
+
+        @Test
+        fun `Given Tailscale extra URL and VPN active when calling getApiUrls then it is included`() = runTest {
+            val provider = createServerConnectionStateProvider(
+                externalUrl = "https://external.example.com",
+                webhookId = "webhook123",
+                allowInsecureConnection = false,
+                extraUrls = listOf(tailscaleUrl),
+            )
+            every { networkHelper.isUsingVpn() } returns true
+
+            val result = provider.getApiUrls().map { it.toString() }
+
+            assertEquals(
+                listOf(
+                    "https://external.example.com/api/webhook/webhook123",
+                    "$tailscaleUrl/api/webhook/webhook123",
+                ),
+                result,
+            )
+        }
+
+        @Test
+        fun `Given Tailscale URL when checking credentials then it is safe only with VPN active`() = runTest {
+            val provider = createServerConnectionStateProvider(
+                externalUrl = tailscaleUrl,
+                allowInsecureConnection = false,
+            )
+
+            every { networkHelper.isUsingVpn() } returns true
+            assertTrue(provider.canSafelySendCredentials("$tailscaleUrl/auth"))
+
+            every { networkHelper.isUsingVpn() } returns false
+            assertFalse(provider.canSafelySendCredentials("$tailscaleUrl/auth"))
+        }
+
+        @Test
+        fun `Given HTTPS URL when collecting urlFlow then the VPN state is not read`() = runTest {
+            val provider = createServerConnectionStateProvider(externalUrl = "https://external.example.com")
+            every { serverDao.getFlow(serverId) } returns flowOf(null)
+
+            provider.urlFlow().first()
+
+            io.mockk.verify(exactly = 0) { networkHelper.isUsingVpn() }
+        }
+    }
+
+    @Nested
     inner class CanSafelySendCredentials {
 
         @Test
