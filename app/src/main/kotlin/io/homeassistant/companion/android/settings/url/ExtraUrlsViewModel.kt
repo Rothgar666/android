@@ -64,11 +64,12 @@ class ExtraUrlsViewModel @Inject constructor(
      */
     suspend fun addUrl(input: String): Boolean = viewModelScope.async {
         editLock.withLock {
-            val connection = serverManager.getServer(serverId)?.connection ?: return@withLock false
+            val server = serverManager.getServer(serverId) ?: return@withLock false
+            val connection = server.connection
             val known = listOfNotNull(connection.externalUrl, connection.internalUrl)
             when (val result = ExtraUrlsList.add(connection.extraUrls, input, known)) {
                 is AddExtraUrlResult.Added -> {
-                    save(result.urls)
+                    save(server.id, result.urls)
                     _uiState.update { it.copy(error = null) }
                     true
                 }
@@ -97,15 +98,20 @@ class ExtraUrlsViewModel @Inject constructor(
     private fun edit(transform: (List<String>) -> List<String>) {
         viewModelScope.launch {
             editLock.withLock {
-                val current = serverManager.getServer(serverId)?.connection?.extraUrls ?: return@withLock
+                val server = serverManager.getServer(serverId) ?: return@withLock
+                val current = server.connection.extraUrls
                 val updated = transform(current)
-                if (updated != current) save(updated)
+                if (updated != current) save(server.id, updated)
             }
         }
     }
 
-    private suspend fun save(newUrls: List<String>) {
-        serverManager.updateExtraUrls(serverId, newUrls)
+    /**
+     * @param id the database ID of the server. [serverId] can be the "active server" marker instead of a real ID,
+     *   so the ID of the loaded server is used.
+     */
+    private suspend fun save(id: Int, newUrls: List<String>) {
+        serverManager.updateExtraUrls(id, newUrls)
         _uiState.update { it.copy(urls = newUrls) }
     }
 }

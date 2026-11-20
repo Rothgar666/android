@@ -41,8 +41,19 @@ interface ServerDao {
      * Replaces only the extra URLs of a server, leaving every other column untouched. Unlike [update] this
      * cannot overwrite concurrent changes of other fields, such as a refreshed session token.
      */
-    @Query("UPDATE servers SET extra_urls = :extraUrls WHERE id = :id")
-    suspend fun updateExtraUrls(id: Int, extraUrls: List<String>)
+    suspend fun updateExtraUrls(id: Int, extraUrls: List<String>) {
+        updateExtraUrlsJson(id, InternalSsidColumnTypeConverter().fromListToString(extraUrls))
+    }
+
+    /**
+     * Writes the already converted value of the `extra_urls` column. Use [updateExtraUrls] instead.
+     *
+     * The value is passed as [String] on purpose: the list converter of [Server] only applies to the columns of
+     * the entity. For a list parameter of a query Room would pick another converter of the database, which writes
+     * a different format that cannot be read back, so the stored URLs would be lost.
+     */
+    @Query("UPDATE servers SET extra_urls = :extraUrlsJson WHERE id = :id")
+    suspend fun updateExtraUrlsJson(id: Int, extraUrlsJson: String)
 
     @Query("DELETE FROM servers WHERE id = :id")
     suspend fun delete(id: Int)

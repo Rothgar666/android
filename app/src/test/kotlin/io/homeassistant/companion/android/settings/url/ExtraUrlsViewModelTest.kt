@@ -37,8 +37,11 @@ class ExtraUrlsViewModelTest {
     /** The extra URLs as stored in the "database" of the fake server manager. */
     private var storedUrls: List<String> = emptyList()
 
+    /** The ID of the server in the database, which can differ from the ID the settings screen was opened with. */
+    private var databaseServerId = serverId
+
     private fun server() = Server(
-        id = serverId,
+        id = databaseServerId,
         _name = "Test Server",
         nameOverride = null,
         _version = "2024.1.0",
@@ -54,19 +57,25 @@ class ExtraUrlsViewModelTest {
         user = ServerUserInfo(),
     )
 
-    private fun createViewModel(initialUrls: List<String> = emptyList()): ExtraUrlsViewModel {
+    private fun createViewModel(
+        initialUrls: List<String> = emptyList(),
+        screenServerId: Int = serverId,
+        serverIdInDatabase: Int = serverId,
+    ): ExtraUrlsViewModel {
         storedUrls = initialUrls
+        databaseServerId = serverIdInDatabase
         // yield() makes reading and writing asynchronous like the real database does.
-        coEvery { serverManager.getServer(serverId) } coAnswers {
+        coEvery { serverManager.getServer(screenServerId) } coAnswers {
             yield()
             server()
         }
-        coEvery { serverManager.updateExtraUrls(serverId, any()) } coAnswers {
+        // Only the real database ID is accepted, like the real update which matches rows by ID.
+        coEvery { serverManager.updateExtraUrls(serverIdInDatabase, any()) } coAnswers {
             yield()
             storedUrls = secondArg()
         }
         return ExtraUrlsViewModel(
-            state = SavedStateHandle(mapOf(ExtraUrlsFragment.EXTRA_SERVER to serverId)),
+            state = SavedStateHandle(mapOf(ExtraUrlsFragment.EXTRA_SERVER to screenServerId)),
             serverManager = serverManager,
             application = mockk<Application>(relaxed = true),
         )
@@ -92,6 +101,36 @@ class ExtraUrlsViewModelTest {
         coVerify { serverManager.updateExtraUrls(serverId, listOf("https://vpn.example.com:8123/")) }
         // Only the extra URLs are written, the rest of the server (for example the session) is not.
         coVerify(exactly = 0) { serverManager.updateServer(any()) }
+    }
+
+    @Test
+    fun `Given the screen opened for the active server when adding a URL then it is saved for the real server`() = runTest(testDispatcher) {
+        // The server settings screen can hand over SERVER_ID_ACTIVE instead of the database ID of the server.
+        val viewModel = createViewModel(
+            screenServerId = ServerManager.SERVER_ID_ACTIVE,
+            serverIdInDatabase = 5,
+        )
+        advanceUntilIdle()
+
+        assertTrue(viewModel.addUrl("https://vpn.example.com"))
+
+        coVerify { serverManager.updateExtraUrls(5, listOf("https://vpn.example.com/")) }
+        assertEquals(listOf("https://vpn.example.com/"), storedUrls)
+    }
+
+    @Test
+    fun `Given the screen opened for the active server when removing a URL then it is removed for the real server`() = runTest(testDispatcher) {
+        val viewModel = createViewModel(
+            initialUrls = listOf("https://a.example.com/", "https://b.example.com/"),
+            screenServerId = ServerManager.SERVER_ID_ACTIVE,
+            serverIdInDatabase = 5,
+        )
+        advanceUntilIdle()
+
+        viewModel.removeUrl("https://a.example.com/")
+        advanceUntilIdle()
+
+        assertEquals(listOf("https://b.example.com/"), storedUrls)
     }
 
     @Test

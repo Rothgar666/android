@@ -133,7 +133,9 @@ internal class ServerManagerImpl @Inject constructor(
     }
 
     override suspend fun updateExtraUrls(serverId: Int, extraUrls: List<String>) {
-        serverDao.updateExtraUrls(serverId, extraUrls)
+        // SERVER_ID_ACTIVE is not a database ID, using it directly would update no row at all.
+        val id = getServerIdSanitize(serverId) ?: return
+        serverDao.updateExtraUrls(id, extraUrls)
     }
 
     override suspend fun removeServer(id: Int) {

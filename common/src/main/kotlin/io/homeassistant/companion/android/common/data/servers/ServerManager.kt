@@ -74,7 +74,7 @@ interface ServerManager {
      * [updateServer] when only the URLs change, as [updateServer] writes the whole server from a snapshot
      * and can overwrite concurrent changes such as a refreshed session token.
      *
-     * @param serverId the ID of the server to update
+     * @param serverId the ID of the server to update, or [SERVER_ID_ACTIVE] for the active server
      * @param extraUrls the new ordered list of additional URLs
      */
     suspend fun updateExtraUrls(serverId: Int, extraUrls: List<String>)

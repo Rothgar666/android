@@ -327,6 +327,42 @@ class ServerManagerImplTest {
     }
 
     @Nested
+    inner class UpdateExtraUrlsTest {
+
+        @Test
+        fun `Given a server ID when updateExtraUrls then only the extra URLs are updated in DAO`() = runTest {
+            coEvery { serverDao.updateExtraUrls(3, listOf("https://vpn.example.com/")) } just Runs
+
+            serverManager.updateExtraUrls(3, listOf("https://vpn.example.com/"))
+
+            coVerify { serverDao.updateExtraUrls(3, listOf("https://vpn.example.com/")) }
+            coVerify(exactly = 0) { serverDao.update(any<Server>()) }
+        }
+
+        @Test
+        fun `Given SERVER_ID_ACTIVE when updateExtraUrls then the active server is updated`() = runTest {
+            // SERVER_ID_ACTIVE is not a database ID: updating by it would match no row and lose the change.
+            coEvery { localStorage.getInt("active_server") } returns 3
+            coEvery { serverDao.updateExtraUrls(3, any()) } just Runs
+
+            serverManager.updateExtraUrls(SERVER_ID_ACTIVE, listOf("https://vpn.example.com/"))
+
+            coVerify { serverDao.updateExtraUrls(3, listOf("https://vpn.example.com/")) }
+            coVerify(exactly = 0) { serverDao.updateExtraUrls(SERVER_ID_ACTIVE, any()) }
+        }
+
+        @Test
+        fun `Given no server when updateExtraUrls with SERVER_ID_ACTIVE then nothing is updated`() = runTest {
+            coEvery { localStorage.getInt("active_server") } returns null
+            coEvery { serverDao.getLastServerId() } returns null
+
+            serverManager.updateExtraUrls(SERVER_ID_ACTIVE, listOf("https://vpn.example.com/"))
+
+            coVerify(exactly = 0) { serverDao.updateExtraUrls(any(), any()) }
+        }
+    }
+
+    @Nested
     inner class RemoveServerTest {
 
         @Test
